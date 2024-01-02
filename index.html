@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="pl">
+	<head>
+		<title>ZX Meble</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+	</head>
+	<body>
+
+		<div class="container" id="container">
+			<div class="row">
+				<h2>Biurko</h2>
+			</div>
+			<div class="row justify-between">
+				<div class="col-md-6">
+					<div id="scena"></div>
+				</div>
+				<div class="col-md-4">
+					<h3>Parametry</h3>
+					<div class="row">
+						<div class="col-xs-4">
+							<p>Szerokość</p>
+						</div>
+						<div class="col-xs-8">
+							<input id="zxwidth" type="range" min="0" value="4" max="6" step="1">
+							<div id="outputwidth"></div>
+						</div>
+					</div>
+					<div class="row">
+						<div class="col-xs-4">
+							<p>Wysokość</p>
+						</div>
+						<div class="col-xs-8">
+							<input id="zxheight" type="range" min="0" value="2" max="4" step="1">
+							<div id="outputheight"></div>
+						</div>
+					</div>
+					<div class="row">
+						<div class="col-xs-4">
+							<p>Głębokość</p>
+						</div>
+						<div class="col-xs-8">
+							<input id="zxdepth" type="range" min="0" value="1" max="4" step="1">
+							<div id="outputdepth"></div>
+						</div>
+					</div>
+					<form>
+						<input type="hidden" id="zxwidthcorp">
+						<input type="hidden" id="zxheightcorp">
+						<input type="hidden" id="zxdepthcorp">
+					</form>
+				</div>
+			</div>
+		</div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./js/three.module.js",
+					"three/addons/": "./js/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			import Stats from 'three/addons/stats.module.js';
+			import { GUI } from 'three/addons/lil-gui.module.min.js';
+
+			import { OrbitControls } from 'three/addons/OrbitControls.js';
+
+			let camera, scene, renderer, bulbLight, bulbMat, hemiLight, stats;
+			let floorMat, dekor;
+
+			let previousShadowMap = false;
+
+			const inputzxdepthcorp = document.getElementById('zxdepthcorp');
+			const inputzxwidthcorp = document.getElementById('zxwidthcorp');
+			const inputzxheightcorp = document.getElementById('zxheightcorp');
+			// Funkcja obsługująca logikę dla inputów
+			function handleInput(inputId, outputId, valuesArray, inputvalue) {
+			    const input = document.getElementById(inputId);
+			    const output = document.getElementById(outputId);
+
+			    input.oninput = function() {
+			        output.innerHTML = valuesArray[this.value] + ' cm.';
+							inputvalue.value = valuesArray[this.value];
+			    };
+			    // Ustawienie domyślnej wartości
+			    input.oninput();
+			}
+			// Tablice z wartościami dla różnych inputów
+			const valueswidth = [40, 50, 60, 70, 80, 90, 100];
+			const valuesheight = [50, 55, 60, 65, 70];
+			const valuesdepth = [40, 45, 50, 55, 60];
+
+			// Obsługa różnych inputów za pomocą funkcji handleInput
+			handleInput('zxwidth', 'outputwidth', valueswidth, inputzxwidthcorp);
+			handleInput('zxheight', 'outputheight', valuesheight, inputzxheightcorp);
+			handleInput('zxdepth', 'outputdepth', valuesdepth, inputzxdepthcorp);
+
+
+			// ref for lumens: http://www.power-sure.com/lumens.htm
+			const bulbLuminousPowers = {
+				'110000 lm (1000W)': 12100000,
+				'3500 lm (300W)': 3500,
+				'1700 lm (100W)': 1700,
+				'800 lm (60W)': 800,
+				'400 lm (40W)': 400,
+				'180 lm (25W)': 180,
+				'20 lm (4W)': 20,
+				'Off': 0
+			};
+
+			// ref for solar irradiances: https://en.wikipedia.org/wiki/Lux
+			const hemiLuminousIrradiances = {
+				'0.0001 lx (Moonless Night)': 0.0001,
+				'0.002 lx (Night Airglow)': 0.002,
+				'0.5 lx (Full Moon)': 0.5,
+				'3.4 lx (City Twilight)': 3.4,
+				'50 lx (Living Room)': 50,
+				'100 lx (Very Overcast)': 100,
+				'350 lx (Office Room)': 350,
+				'400 lx (Sunrise/Sunset)': 400,
+				'1000 lx (Overcast)': 1000,
+				'18000 lx (Daylight)': 18000,
+				'50000 lx (Direct Sun)': 50000
+			};
+
+			const params = {
+				shadows: true,
+				exposure: 0.90,
+				bulbPower: Object.keys( bulbLuminousPowers )[ 0 ],
+				hemiIrradiance: Object.keys( hemiLuminousIrradiances )[ 3 ]
+			};
+
+			init();
+			animate();
+
+			function init() {
+
+				const container = document.getElementById( 'scena' );
+
+				// stats = new Stats();
+				// container.appendChild( stats.dom );
+
+				// Pobranie szerokości i wysokości kontenera (diva)
+				const containerWidth = document.getElementById('scena').clientWidth;
+				const containerHeight = document.getElementById('scena').clientHeight;
+
+				//camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 100 );
+				camera = new THREE.PerspectiveCamera( 50, containerWidth / containerHeight, 0.1, 1000 );
+				camera.position.x = - 130;
+				camera.position.z = 80;
+				camera.position.y = 80;
+
+				scene = new THREE.Scene();
+
+				const bulbGeometry = new THREE.SphereGeometry( 0.02, 160, 80 );
+				bulbLight = new THREE.PointLight( 0xffee88, 1, 1000, 2 );
+
+				bulbMat = new THREE.MeshStandardMaterial( {
+					emissive: 0xffffff,
+					emissiveIntensity: 1,
+					color: 0x000000
+				} );
+				bulbLight.add( new THREE.Mesh( bulbGeometry, bulbMat ) );
+				bulbLight.position.set( -220, 320, 260 );
+				bulbLight.castShadow = true;
+				scene.add( bulbLight );
+
+				hemiLight = new THREE.HemisphereLight( 0xddeeff, 0x0f0e0d, 0.02 );
+				scene.add( hemiLight );
+
+				floorMat = new THREE.MeshStandardMaterial( {
+					roughness: 0.8,
+					color: 0xffffff,
+					metalness: 0.2,
+					bumpScale: 1
+				} );
+				const textureLoader = new THREE.TextureLoader();
+				textureLoader.load( 'textures/hardwood2_diffuse.jpg', function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 10, 24 );
+					map.colorSpace = THREE.SRGBColorSpace;
+					floorMat.map = map;
+					floorMat.needsUpdate = true;
+
+				} );
+				textureLoader.load( 'textures/hardwood2_bump.jpg', function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 10, 24 );
+					floorMat.bumpMap = map;
+					floorMat.needsUpdate = true;
+
+				} );
+				textureLoader.load( 'textures/hardwood2_roughness.jpg', function ( map ) {
+
+					map.wrapS = THREE.RepeatWrapping;
+					map.wrapT = THREE.RepeatWrapping;
+					map.anisotropy = 4;
+					map.repeat.set( 10, 24 );
+					floorMat.roughnessMap = map;
+					floorMat.needsUpdate = true;
+				} );
+
+				dekor = new THREE.MeshStandardMaterial( {
+					color: 0xffffff,
+					roughness: 0.9,
+					metalness: 0.2
+				} );
+				textureLoader.load( 'img/H1176.jpg', function ( map ) {
+					map.anisotropy = 4;
+					map.colorSpace = THREE.SRGBColorSpace;
+					dekor.map = map;
+					dekor.needsUpdate = true;
+				} );
+
+				textureLoader.load( 'img/H1176.jpg', function ( map ) {
+					map.anisotropy = 4;
+					map.colorSpace = THREE.SRGBColorSpace;
+					dekor.map = map;
+					dekor.needsUpdate = true;
+				} );
+
+				const floorGeometry = new THREE.PlaneGeometry( 2000, 2000 );
+				const floorMesh = new THREE.Mesh( floorGeometry, floorMat );
+				floorMesh.position.set( 0, -30, 0 );
+				floorMesh.receiveShadow = true;
+				floorMesh.rotation.x = - Math.PI / 2.0;
+				//floorMesh.rotation.x = - 90;
+				scene.add( floorMesh );
+
+				// const ballGeometry = new THREE.SphereGeometry( 0.25, 32, 32 );
+				// const ballMesh = new THREE.Mesh( ballGeometry, ballMat );
+				// ballMesh.position.set( 1, 0.25, 1 );
+				// ballMesh.rotation.y = Math.PI;
+				// ballMesh.castShadow = true;
+				// scene.add( ballMesh );
+
+				//Parametry
+				let depthcorp = inputzxdepthcorp.value;
+				console.log(depthcorp);
+
+				const boxGeometry = new THREE.BoxGeometry( depthcorp, 60, 1.8 );
+				const leftSide = new THREE.Mesh( boxGeometry, dekor );
+				leftSide.position.set( 0, 0, -40 );
+				leftSide.castShadow = true;
+				scene.add( leftSide );
+
+				//const boxGeometry = new THREE.BoxGeometry( 45, 60, 1.8 );
+				const rightSide = new THREE.Mesh( boxGeometry, dekor );
+				rightSide.position.set( 0, 0, 40 );
+				rightSide.castShadow = true;
+				scene.add( rightSide );
+
+				const topGeometry = new THREE.BoxGeometry( 45, 82, 1.8 );
+				const holeGeometry = new THREE.BoxGeometry(10, 10, 1.8); // Geometria reprezentująca otwór
+				const top = new THREE.Mesh( topGeometry, dekor );
+				// Przesunięcie geometrii otworu do odpowiedniej pozycji
+				holeGeometry.translate(0, 0, 0); // Ustawienie położenia otworu - dostosuj do potrzeb
+				const holeMesh = new THREE.Mesh(holeGeometry);
+				// Tworzenie obiektu ThreeBSP z geometrii otworu
+				//const holeBSP = new ThreeBSP(holeMesh.geometry);
+				// Tworzenie obiektu ThreeBSP z geometrii elementu
+				//const elementBSP = new ThreeBSP(top.geometry);
+
+				// Operacja odejmowania geometrii otworu od geometrii elementu
+				//const resultBSP = elementBSP.subtract(holeBSP);
+
+				// Tworzenie mesh-a z wyniku operacji boolean
+				//const resultMesh = resultBSP.toMesh();
+				//resultMesh.material = dekor; // Przypisanie materiału
+
+				top.position.set( 0, 30, 0 );
+				top.rotation.x = - Math.PI / 2.0;
+				top.castShadow = true;
+				scene.add( top );
+
+				// resultMesh.position.set( 0, 60, 40 );
+				// resultMesh.rotation.x = - Math.PI / 2.0;
+				// resultMesh.castShadow = true;
+				// scene.add( resultMesh );
+
+				const blendGeometry = new THREE.BoxGeometry( 30, 80, 1.8 );
+				const blend = new THREE.Mesh( blendGeometry, dekor );
+				blend.position.set( 21, 15, 0 );
+				blend.rotation.x = - Math.PI / 2.0;
+				blend.rotation.y = - Math.PI / 2.0;
+				blend.castShadow = true;
+				scene.add( blend );
+
+				renderer = new THREE.WebGLRenderer();
+				renderer.shadowMap.enabled = true;
+				renderer.toneMapping = THREE.ReinhardToneMapping;
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( containerWidth, containerHeight );
+				renderer.setClearColor(0xdddddd); // Zmiana koloru tła na biały
+				container.appendChild( renderer.domElement );
+
+
+				const controls = new OrbitControls( camera, renderer.domElement );
+				controls.minDistance = 20;
+				controls.maxDistance = 300;
+
+				window.addEventListener( 'resize', onWindowResize );
+
+
+				// const gui = new GUI();
+				//
+				// gui.add( params, 'hemiIrradiance', Object.keys( hemiLuminousIrradiances ) );
+				// gui.add( params, 'bulbPower', Object.keys( bulbLuminousPowers ) );
+				// gui.add( params, 'exposure', 0, 1 );
+				// gui.add( params, 'shadows' );
+				// gui.open();
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = containerWidth / containerHeight;
+				camera.updateProjectionMatrix();
+
+				//renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.setSize( containerWidth, containerHeight );
+
+			}
+
+			//
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+
+				render();
+
+			}
+
+			function render() {
+
+				renderer.toneMappingExposure = Math.pow( params.exposure, 5.0 ); // to allow for very bright scenes.
+				renderer.shadowMap.enabled = params.shadows;
+				bulbLight.castShadow = params.shadows;
+
+				if ( params.shadows !== previousShadowMap ) {
+
+					dekor.needsUpdate = true;
+					floorMat.needsUpdate = true;
+					previousShadowMap = params.shadows;
+
+				}
+
+				bulbLight.power = bulbLuminousPowers[ params.bulbPower ];
+				bulbMat.emissiveIntensity = bulbLight.intensity / Math.pow( 0.02, 2.0 ); // convert from intensity to irradiance at bulb surface
+
+				hemiLight.intensity = hemiLuminousIrradiances[ params.hemiIrradiance ];
+				const time = Date.now() * 0.0005;
+
+				//bulbLight.position.y = Math.cos( time ) * 0.75 + 1.25;
+
+				renderer.render( scene, camera );
+
+				//stats.update();
+
+			}
+
+		</script>
+	</body>
+</html>
